@@ -1,0 +1,151 @@
+<!-- app/templates/index.html -->
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Email Copilot</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        .upload-section, .query-section { margin-bottom: 30px; padding: 20px; border: 1px solid #ddd; }
+        .query-input { width: 100%; height: 100px; margin-bottom: 10px; }
+        .response-section { margin-top: 20px; }
+        .chain-of-thought { background: #f5f5f5; padding: 15px; margin: 10px 0; }
+        .step { margin: 5px 0; padding: 5px; background: white; }
+        button { padding: 10px 20px; background: #007cba; color: white; border: none; cursor: pointer; }
+        button:hover { background: #005a87; }
+        .file-list { margin-top: 15px; }
+        .file-item { margin: 5px 0; padding: 5px; background: #f0f0f0; border-radius: 3px; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>Email Copilot</h1>
+
+    <!-- File Upload Section -->
+    <div class="upload-section">
+        <h2>Upload Emails (.msg files)</h2>
+        <input type="file" id="fileInput" accept=".msg" multiple>
+        <button onclick="uploadFiles()">Upload Emails</button>
+        <div id="uploadStatus"></div>
+        <div id="fileList" class="file-list"></div>
+    </div>
+
+    <!-- Query Section -->
+    <div class="query-section">
+        <h2>Ask about your emails</h2>
+        <textarea id="queryInput" class="query-input" placeholder="Ask a question about your emails..."></textarea>
+        <br>
+        <button onclick="submitQuery()">Ask Question</button>
+    </div>
+
+    <!-- Response Section -->
+    <div id="responseSection" class="response-section" style="display: none;">
+        <h2>Response</h2>
+        <div id="response"></div>
+
+        <h3>Chain of Thought</h3>
+        <div id="chainOfThought" class="chain-of-thought"></div>
+    </div>
+</div>
+
+<script>
+    async function uploadFiles() {
+        const fileInput = document.getElementById('fileInput');
+        const files = fileInput.files;
+
+        if (files.length === 0) {
+            alert('Please select at least one file');
+            return;
+        }
+
+        const formData = new FormData();
+
+        // Append all selected files to the FormData
+        for (let i = 0; i < files.length; i++) {
+            formData.append('files', files[i]);
+        }
+
+        try {
+            const response = await fetch('/upload-email', {
+                method: 'POST',
+                body: formData
+            });
+
+            const result = await response.json();
+
+            // Display upload status
+            if (response.ok) {
+                document.getElementById('uploadStatus').innerHTML = `✅ ${result.message}`;
+                displayUploadedFiles(files);
+            } else {
+                document.getElementById('uploadStatus').innerHTML = `❌ ${result.detail}`;
+            }
+        } catch (error) {
+            document.getElementById('uploadStatus').innerHTML = `❌ Error: ${error.message}`;
+        }
+    }
+
+    function displayUploadedFiles(files) {
+        const fileList = document.getElementById('fileList');
+        fileList.innerHTML = '<h3>Uploaded Files:</h3>';
+
+        for (let i = 0; i < files.length; i++) {
+            const fileItem = document.createElement('div');
+            fileItem.className = 'file-item';
+            fileItem.textContent = files[i].name;
+            fileList.appendChild(fileItem);
+        }
+    }
+
+    async function submitQuery() {
+        const query = document.getElementById('queryInput').value;
+
+        if (!query.trim()) {
+            alert('Please enter a question');
+            return;
+        }
+
+        try {
+            const response = await fetch('/query', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ prompt: query })
+            });
+
+            const result = await response.json();
+
+            if (response.ok) {
+                displayResponse(result);
+            } else {
+                alert(`Error: ${result.detail}`);
+            }
+        } catch (error) {
+            alert(`Error: ${error.message}`);
+        }
+    }
+
+    function displayResponse(result) {
+        document.getElementById('responseSection').style.display = 'block';
+
+        // Display main response
+        document.getElementById('response').innerHTML =
+            result.error ? `❌ ${result.error}` : result.response;
+
+        // Display chain of thought
+        const chainDiv = document.getElementById('chainOfThought');
+        chainDiv.innerHTML = '';
+
+        if (result.chain_of_thought) {
+            result.chain_of_thought.forEach(step => {
+                const stepDiv = document.createElement('div');
+                stepDiv.className = 'step';
+                stepDiv.innerHTML = `<strong>Step ${step.step} (${step.type}):</strong> ${step.content}`;
+                chainDiv.appendChild(stepDiv);
+            });
+        }
+    }
+</script>
+</body>
+</html>

@@ -1,0 +1,81 @@
+version: '3.8'
+
+services:
+  chromadb:
+    image: chromadb/chroma:latest
+    container_name: email_chroma
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data/chroma:/chroma/chroma
+    environment:
+      - CHROMA_SERVER_HOST=0.0.0.0
+      - CHROMA_SERVER_HTTP_PORT=8000
+      - IS_PERSISTENT=TRUE
+      - PERSISTENT_DIRECTORY=/chroma/chroma
+#    command: uvicorn chromadb.app:app --host 0.0.0.0 --port 8000
+
+  vllm:
+    build:
+      context: .
+      dockerfile: Dockerfile.vllm
+    container_name: email_vllm
+    ports:
+      - "8001:8000"
+    volumes:
+      - ./models:/models
+      - /dev/shm:/dev/shm
+    environment:
+      - CUDA_VISIBLE_DEVICES=0
+      - PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:128
+      - HUGGING_FACE_HUB_TOKEN=HF_TOKEN
+      #- CUDA_VISIBLE_DEVICES=0,1,2,3
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              capabilities: [gpu]
+    ulimits:
+      memlock: -1
+      stack: -1
+    command: [
+#      "python", "-m", "vllm.entrypoints.openai.api_server",
+#      "--model", "/models/Llama-3.2-1B",
+      "--model", "meta-llama/Llama-3.1-8B-Instruct",
+      "--tensor-parallel-size", "1",
+      "--gpu_memory_utilization", ".95",
+      "--quantization", "fp8",
+      "--host", "0.0.0.0",
+      "--port", "8000",
+      "--max-model-len", "32000",
+      "--max-num-seqs", "8",
+      "--max-num-batched-tokens", "8192",
+      "--enforce-eager",
+      "--swap-space", "2",
+      "--chat-template-content-format", "openai"
+]
+
+  email_agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.agent
+    container_name: email_agent_app
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data/emails:/app/data/emails
+      - ./data/uploads:/app/data/uploads
+    environment:
+      - CHROMA_HOST=chromadb
+      - CHROMA_PORT=8000
+      - VLLM_HOST=vllm
+      - VLLM_PORT=8000
+      - MAX_CONTEXT_TOKENS=22000
+      - MAX_QUERIES=10
+    depends_on:
+      - chromadb
+      - vllm
+
+volumes:
+  chroma_data:

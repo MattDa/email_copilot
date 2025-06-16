@@ -1,0 +1,12 @@
+FROM vllm/vllm-openai:latest
+
+# Install additional dependencies if needed
+RUN pip install --upgrade pip
+RUN pip install transformers torch
+
+# Set working directory
+WORKDIR /app
+
+# Expose port
+EXPOSE 8000
+ENTRYPOINT ["python3", "-m", "vllm.entrypoints.openai.api_server"]

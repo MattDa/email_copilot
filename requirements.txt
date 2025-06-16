@@ -1,0 +1,21 @@
+# requirements.txt
+fastapi
+uvicorn
+langchain
+langchain-community
+chromadb>=1.0.0
+openai
+extract-msg
+jinja2
+python-multipart
+aiofiles
+pydantic
+tiktoken
+numpy
+sentence-transformers
+
+# Fix for SafetensorError
+safetensors==0.4.1
+transformers>=4.38.0
+torch>=2.1.0
+vllm>=0.3.0
