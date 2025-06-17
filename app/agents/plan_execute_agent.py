@@ -2,6 +2,7 @@
 import json
 import tiktoken
 import os
+import re
 from typing import List, Dict, Any
 from langchain.schema import BaseMessage, HumanMessage, AIMessage
 
@@ -36,7 +37,7 @@ class PlanExecuteAgent:
         chain_of_thought.append({
             "step": 2,
             "type": "initial_query",
-            "content": f"Generated initial query: {initial_query}"
+            "content": f"Generated initial query: {json.dumps(initial_query)}"
         })
 
         # Get initial results
@@ -90,7 +91,7 @@ class PlanExecuteAgent:
             chain_of_thought.append({
                 "step": current_query_num + 3,
                 "type": "query_refinement",
-                "content": f"Refined query #{current_query_num + 1}: {refined_query}"
+                "content": f"Refined query #{current_query_num + 1}: {json.dumps(refined_query)}"
             })
 
             # Execute refined query
@@ -167,8 +168,8 @@ class PlanExecuteAgent:
         response = await self.llm_service.generate(plan_prompt, max_tokens=300)
         return response.strip()
 
-    async def _generate_initial_query(self, user_prompt: str, plan: str) -> str:
-        """Generate the initial broad query"""
+    async def _generate_initial_query(self, user_prompt: str, plan: str) -> Dict[str, Any]:
+        """Generate the initial broad query as a dict with optional filters"""
         query_prompt = f"""
         Based on this search strategy, create a search query to find relevant emails:
 
@@ -179,17 +180,18 @@ class PlanExecuteAgent:
 
         Search Query:
         """
-
         response = await self.llm_service.generate(query_prompt, max_tokens=100)
-        return response.strip()
+        query_text = response.strip()
+        filters = self._extract_filters(user_prompt)
+        return {"text": query_text, **filters}
 
     async def _refine_query(
-            self,
-            user_prompt: str,
-            plan: str,
-            current_results: List[Dict[str, Any]],
-            iteration: int
-    ) -> str:
+        self,
+        user_prompt: str,
+        plan: str,
+        current_results: List[Dict[str, Any]],
+        iteration: int,
+    ) -> Dict[str, Any]:
         """Generate a refined query based on current results"""
 
         # Analyze current results to inform refinement
@@ -213,7 +215,40 @@ class PlanExecuteAgent:
         """
 
         response = await self.llm_service.generate(refinement_prompt, max_tokens=100)
-        return response.strip()
+        query_text = response.strip()
+        filters = self._extract_filters(user_prompt)
+        return {"text": query_text, **filters}
+
+    def _extract_filters(self, text: str) -> Dict[str, Any]:
+        """Extract sender and date filters from text"""
+        filters: Dict[str, Any] = {}
+
+        sender_match = re.search(r"from\s+([\w.\-]+@[\w\.-]+)", text, re.IGNORECASE)
+        if sender_match:
+            filters["sender"] = sender_match.group(1)
+
+        start = None
+        end = None
+
+        exact_match = re.search(r"on\s+(\d{4}-\d{2}-\d{2})", text)
+        if exact_match:
+            start = exact_match.group(1)
+            end = exact_match.group(1)
+
+        after_match = re.search(r"(?:after|since)\s+(\d{4}-\d{2}-\d{2})", text, re.IGNORECASE)
+        if after_match:
+            start = after_match.group(1)
+
+        before_match = re.search(r"before\s+(\d{4}-\d{2}-\d{2})", text, re.IGNORECASE)
+        if before_match:
+            end = before_match.group(1)
+
+        if start:
+            filters["start_date"] = start
+        if end:
+            filters["end_date"] = end
+
+        return filters
 
     def _merge_and_deduplicate(
             self,
