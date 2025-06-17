@@ -83,10 +83,10 @@ class ChromaService:
         print(f"Successfully added email {email_id} to ChromaDB")
 
     async def search(
-            self,
-            query_text: str,
-            n_results: int = 10,
-            where: Optional[Dict] = None
+        self,
+        query_text: str,
+        n_results: int = 10,
+        where: Optional[Dict] = None,
     ) -> List[Dict[str, Any]]:
         """Search emails in ChromaDB"""
 
@@ -101,7 +101,8 @@ class ChromaService:
             results = self.collection.query(
                 query_embeddings=[query_embedding],
                 n_results=n_results,
-                include=['documents', 'metadatas', 'distances']
+                include=["documents", "metadatas", "distances"],
+                where=where,
             )
         except Exception as e:
             print(f"ChromaDB query error: {e}")
