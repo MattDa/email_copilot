@@ -61,7 +61,11 @@ class PlanExecuteAgent:
         filtered_results = email_results
         current_query_num = 1
 
-        while current_query_num <= self.max_queries:
+        # Check token count of current results
+        current_tokens = self._count_tokens_from_emails(filtered_results)
+
+        while (current_query_num <= self.max_queries or
+               current_tokens <= self.max_context_tokens):
             # Check token count of current results
             current_tokens = self._count_tokens_from_emails(filtered_results)
 
