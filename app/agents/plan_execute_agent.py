@@ -61,7 +61,11 @@ class PlanExecuteAgent:
         filtered_results = email_results
         current_query_num = 1
 
-        while current_query_num <= self.max_queries:
+        # Check token count of current results
+        current_tokens = self._count_tokens_from_emails(filtered_results)
+
+        while (current_query_num <= self.max_queries or
+               current_tokens <= self.max_context_tokens):
             # Check token count of current results
             current_tokens = self._count_tokens_from_emails(filtered_results)
 
@@ -185,6 +189,7 @@ class PlanExecuteAgent:
         filters = self._extract_filters(user_prompt)
         return {"text": query_text, "limit": 20, **filters}
 
+
     async def _refine_query(
         self,
         user_prompt: str,
@@ -218,6 +223,7 @@ class PlanExecuteAgent:
         query_text = response.strip()
         filters = self._extract_filters(user_prompt)
         return {"text": query_text, "limit": 20, **filters}
+
 
     def _extract_filters(self, text: str) -> Dict[str, Any]:
         """Extract sender and date filters from text"""
