@@ -46,7 +46,7 @@ class PlanExecuteAgent:
         chain_of_thought.append({
             "step": 3,
             "type": "initial_results",
-            "content": f"Retrieved {len(email_results)} initial email results"
+            "content": f"Retrieved {len(email_results)} initial chunks"
         })
 
         if not email_results:
@@ -72,7 +72,7 @@ class PlanExecuteAgent:
             chain_of_thought.append({
                 "step": current_query_num + 3,
                 "type": "token_check",
-                "content": f"Current context tokens: {current_tokens}/{self.max_context_tokens} with {len(filtered_results)} emails"
+                "content": f"Current context tokens: {current_tokens}/{self.max_context_tokens} with {len(filtered_results)} chunks"
             })
 
             # If within limits, we're good to proceed
@@ -86,7 +86,7 @@ class PlanExecuteAgent:
                 chain_of_thought.append({
                     "step": current_query_num + 3,
                     "type": "aggressive_filtering",
-                    "content": f"Applied aggressive filtering, reduced to {len(filtered_results)} emails"
+                    "content": f"Applied aggressive filtering, reduced to {len(filtered_results)} chunks"
                 })
                 break
 
@@ -107,7 +107,7 @@ class PlanExecuteAgent:
             chain_of_thought.append({
                 "step": current_query_num + 3,
                 "type": "refined_results",
-                "content": f"After refinement: {len(filtered_results)} total unique emails"
+                "content": f"After refinement: {len(filtered_results)} total unique chunks"
             })
 
             current_query_num += 1
@@ -123,15 +123,15 @@ class PlanExecuteAgent:
             chain_of_thought.append({
                 "step": "emergency_filter",
                 "type": "emergency_filtering",
-                "content": f"Applied emergency filtering: {len(filtered_results)} emails, {final_tokens} tokens"
+                "content": f"Applied emergency filtering: {len(filtered_results)} chunks, {final_tokens} tokens"
             })
 
             if final_tokens > self.max_context_tokens:
                 return {
-                    "error": f"Unable to reduce context to fit within {self.max_context_tokens} token limit. Found relevant emails but context is too large.",
+                    "error": f"Unable to reduce context to fit within {self.max_context_tokens} token limit. Found relevant chunks but context is too large.",
                     "chain_of_thought": chain_of_thought,
                     "emails_found": len(email_results),
-                    "final_emails": len(filtered_results)
+                    "final_emails": final_tokens
                 }
 
         # Step 4: Generate final response with email context
@@ -140,7 +140,7 @@ class PlanExecuteAgent:
         chain_of_thought.append({
             "step": "final",
             "type": "response_generation",
-            "content": f"Generated response using {len(filtered_results)} emails as context ({final_tokens} tokens)"
+            "content": f"Generated response using {len(filtered_results)} chunks as context ({final_tokens} tokens)"
         })
 
         return {
@@ -148,7 +148,7 @@ class PlanExecuteAgent:
             "chain_of_thought": chain_of_thought,
             "context_tokens_used": final_tokens,
             "queries_executed": current_query_num,
-            "emails_analyzed": len(filtered_results)
+            "emails_analyzed": final_tokens
         }
 
     async def _create_plan(self, user_prompt: str) -> str:
@@ -187,7 +187,8 @@ class PlanExecuteAgent:
         response = await self.llm_service.generate(query_prompt, max_tokens=100)
         query_text = response.strip()
         filters = self._extract_filters(user_prompt)
-        return {"text": query_text, **filters}
+        return {"text": query_text, "limit": 20, **filters}
+
 
     async def _refine_query(
         self,
@@ -221,7 +222,8 @@ class PlanExecuteAgent:
         response = await self.llm_service.generate(refinement_prompt, max_tokens=100)
         query_text = response.strip()
         filters = self._extract_filters(user_prompt)
-        return {"text": query_text, **filters}
+        return {"text": query_text, "limit": 20, **filters}
+
 
     def _extract_filters(self, text: str) -> Dict[str, Any]:
         """Extract sender and date filters from text"""
@@ -314,15 +316,8 @@ class PlanExecuteAgent:
         if not email_results:
             return 0
 
-        # Create a text representation of the emails for token counting
-        email_text = ""
-        for email in email_results:
-            email_text += f"Subject: {email.get('subject', '')}\n"
-            email_text += f"From: {email.get('sender', '')}\n"
-            email_text += f"Date: {email.get('date', '')}\n"
-            email_text += f"Content: {email.get('content', '')}\n\n"
-
-        return len(self.encoder.encode(email_text))
+        content_text = "\n".join(email.get("content", "") for email in email_results)
+        return len(self.encoder.encode(content_text))
 
     async def _generate_final_response(
             self,

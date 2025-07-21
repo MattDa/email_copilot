@@ -3,6 +3,8 @@ import os
 import chromadb
 from chromadb.config import Settings
 from typing import List, Dict, Any, Optional
+import math
+import tiktoken
 from sentence_transformers import SentenceTransformer
 
 
@@ -11,6 +13,31 @@ class ChromaService:
         self.client = None
         self.collection = None
         self.embedder = None
+        self.tokenizer = tiktoken.get_encoding("cl100k_base")
+
+    def _chunk_text(
+        self, text: str, max_tokens: int = 1000, overlap_ratio: float = 0.15
+    ) -> List[str]:
+        """Chunk text into pieces <= max_tokens with specified overlap."""
+        tokens = self.tokenizer.encode(text)
+        total = len(tokens)
+        if total <= max_tokens:
+            return [text]
+
+        num_chunks = math.ceil(total / max_tokens)
+        chunk_size = min(max_tokens, math.ceil(total / num_chunks))
+        step = max(1, int(chunk_size * (1 - overlap_ratio)))
+
+        chunks = []
+        start = 0
+        while start < total:
+            chunk_tokens = tokens[start : start + chunk_size]
+            chunks.append(self.tokenizer.decode(chunk_tokens))
+            if start + chunk_size >= total:
+                break
+            start += step
+
+        return chunks
 
     async def initialize(self):
         """Initialize ChromaDB client and collection"""
@@ -39,48 +66,46 @@ class ChromaService:
         if not self.collection:
             await self.initialize()
 
-        # Get the email body content
-        body_content = email_data.get('body', '')
-        subject = email_data.get('subject', '')
+        body_content = email_data.get("body", "")
+        subject = email_data.get("subject", "")
 
-        # Create content for embedding (subject + body)
-        embedding_content = f"{subject} {body_content}"
+        print(
+            f"Adding email to ChromaDB: Subject='{subject}', Body length={len(body_content)}"
+        )
 
-        # Debug print
-        print(f"Adding email to ChromaDB: Subject='{subject}', Body length={len(body_content)}")
+        # Determine chunks for the body content
+        chunks = self._chunk_text(body_content)
 
-        # Create embedding
-        embedding = self.embedder.encode(embedding_content).tolist()
-
-        # Generate unique ID if not provided
-        email_id = email_data.get('message_id')
+        email_id = email_data.get("message_id")
         if not email_id:
             try:
                 existing = self.collection.get()
                 email_id = f"email_{len(existing['ids'])}"
-            except:
+            except Exception:
                 email_id = "email_0"
 
-        # Store the full body content in the document field
-        # This is crucial - the document field is what gets returned in searches
-        document_content = body_content if body_content else subject
+        for idx, chunk in enumerate(chunks, 1):
+            embedding_content = f"{subject} {chunk}"
+            embedding = self.embedder.encode(embedding_content).tolist()
 
-        # Add to collection
-        self.collection.add(
-            embeddings=[embedding],
-            documents=[document_content],  # This should contain the email body
-            metadatas=[{
-                'subject': subject,
-                'sender': email_data.get('sender', ''),
-                'recipient': email_data.get('recipient', ''),
-                'date': email_data.get('date', ''),
-                'message_id': email_id,
-                'body_length': len(body_content)  # Store body length for debugging
-            }],
-            ids=[email_id]
-        )
+            chunk_id = f"{email_id}_chunk{idx}"
+            self.collection.add(
+                embeddings=[embedding],
+                documents=[chunk],
+                metadatas=[{
+                    "subject": subject,
+                    "sender": email_data.get("sender", ""),
+                    "recipient": email_data.get("recipient", ""),
+                    "date": email_data.get("date", ""),
+                    "message_id": email_id,
+                    "chunk_index": idx,
+                    "total_chunks": len(chunks),
+                    "body_length": len(chunk),
+                }],
+                ids=[chunk_id],
+            )
 
-        print(f"Successfully added email {email_id} to ChromaDB")
+        print(f"Successfully added email {email_id} with {len(chunks)} chunks to ChromaDB")
 
     async def search(
         self,
@@ -92,6 +117,8 @@ class ChromaService:
 
         if not self.collection:
             await self.initialize()
+
+        n_results = min(max(n_results, 1), 20)
 
         # Create query embedding
         query_embedding = self.embedder.encode(query_text).tolist()

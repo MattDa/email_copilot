@@ -17,7 +17,7 @@ class ToolUsingAgent:
         # Execute search in ChromaDB
         results = await self.chroma_service.search(
             query_text=search_params.get("text", query if isinstance(query, str) else ""),
-            n_results=search_params.get("limit", 25),
+            n_results=search_params.get("limit", 20),
             where=search_params.get("filters")
         )
 
@@ -43,7 +43,7 @@ class ToolUsingAgent:
 
         params: Dict[str, Any] = {
             "text": "",
-            "limit": 25,
+            "limit": 20,
             "filters": {},
         }
 
@@ -68,7 +68,8 @@ class ToolUsingAgent:
             q_lower = query.lower()
 
             if any(word in q_lower for word in ["all", "every", "list", "show me"]):
-                params["limit"] = 50
+                params["limit"] = 20
+
             elif any(word in q_lower for word in ["specific", "exact", "particular"]):
                 params["limit"] = 15
 
@@ -84,6 +85,7 @@ class ToolUsingAgent:
             if before_match:
                 params.setdefault("filters", {}).setdefault("date", {})["$lte"] = before_match.group(1)
 
+        params["limit"] = min(max(params.get("limit", 20), 1), 20)
         if not params["filters"]:
             params["filters"] = None
 
