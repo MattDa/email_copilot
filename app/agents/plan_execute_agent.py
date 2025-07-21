@@ -224,7 +224,6 @@ class PlanExecuteAgent:
         filters = self._extract_filters(user_prompt)
         return {"text": query_text, "limit": 20, **filters}
 
-
     def _extract_filters(self, text: str) -> Dict[str, Any]:
         """Extract sender and date filters from text"""
         filters: Dict[str, Any] = {}
@@ -356,10 +355,11 @@ class PlanExecuteAgent:
 
         formatted_emails = []
 
-        for i, email in enumerate(email_results[:20], 1):  # Limit to top 20 emails
+        for email in email_results[:20]:  # Limit to top 20 emails
+            subject = email.get('subject', 'No Subject')
             email_text = f"""
-EMAIL {i}:
-Subject: {email.get('subject', 'No Subject')}
+EMAIL {subject}:
+Subject: {subject}
 From: {email.get('sender', 'Unknown Sender')}
 To: {email.get('recipient', 'Unknown Recipient')}
 Date: {email.get('date', 'Unknown Date')}
