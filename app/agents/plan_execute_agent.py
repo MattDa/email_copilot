@@ -79,14 +79,27 @@ class PlanExecuteAgent:
             if current_tokens <= self.max_context_tokens:
                 break
 
-            # If too large, need to filter
-            if current_query_num >= self.max_queries:
-                # Last attempt - aggressively filter
-                filtered_results = self._aggressive_filter(filtered_results, user_prompt)
+            # If too large, first try metadata-based filtering
+            pre_filter_len = len(filtered_results)
+            filtered_results = self.__metadata_filter(filtered_results, user_prompt)
+            if len(filtered_results) < pre_filter_len:
                 chain_of_thought.append({
                     "step": current_query_num + 3,
-                    "type": "aggressive_filtering",
-                    "content": f"Applied aggressive filtering, reduced to {len(filtered_results)} chunks"
+                    "type": "metadata_filtering",
+                    "content": f"Applied metadata filtering, reduced to {len(filtered_results)} chunks"
+                })
+
+            current_tokens = self._count_tokens_from_emails(filtered_results)
+            if current_tokens <= self.max_context_tokens:
+                break
+
+            if current_query_num >= self.max_queries:
+                # Last attempt - filter as much as possible
+                filtered_results = self.__metadata_filter(filtered_results, user_prompt)
+                chain_of_thought.append({
+                    "step": current_query_num + 3,
+                    "type": "metadata_filtering",
+                    "content": f"Applied metadata filtering, reduced to {len(filtered_results)} chunks"
                 })
                 break
 
@@ -189,7 +202,6 @@ class PlanExecuteAgent:
         filters = self._extract_filters(user_prompt)
         return {"text": query_text, "limit": 20, **filters}
 
-
     async def _refine_query(
         self,
         user_prompt: str,
@@ -276,15 +288,34 @@ class PlanExecuteAgent:
 
         return merged
 
-    def _aggressive_filter(
-            self,
-            results: List[Dict[str, Any]],
-            user_prompt: str
+    def __metadata_filter(
+        self,
+        results: List[Dict[str, Any]],
+        user_prompt: str,
     ) -> List[Dict[str, Any]]:
-        """Aggressively filter results to fit token limits"""
+        """Filter results using metadata clues and token limits"""
+
+        filters = self._extract_filters(user_prompt)
+
+        if filters.get("sender"):
+            results = [r for r in results if r.get("sender", "").lower() == filters["sender"].lower()]
+
+        start = filters.get("start_date")
+        end = filters.get("end_date")
+        if start or end:
+            def in_range(date_str: str) -> bool:
+                if not date_str:
+                    return False
+                if start and date_str < start:
+                    return False
+                if end and date_str > end:
+                    return False
+                return True
+
+            results = [r for r in results if in_range(r.get("date", ""))]
 
         # Keep only the highest scoring results
-        sorted_results = sorted(results, key=lambda x: x.get('score', 0), reverse=True)
+        sorted_results = sorted(results, key=lambda x: x.get("score", 0), reverse=True)
 
         # Start with top results and add until we approach token limit
         filtered = []
