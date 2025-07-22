@@ -2,6 +2,7 @@
 import json
 import tiktoken
 import os
+import re
 from typing import List, Dict, Any
 from langchain.schema import BaseMessage, HumanMessage, AIMessage
 
@@ -36,7 +37,7 @@ class PlanExecuteAgent:
         chain_of_thought.append({
             "step": 2,
             "type": "initial_query",
-            "content": f"Generated initial query: {initial_query}"
+            "content": f"Generated initial query: {json.dumps(initial_query)}"
         })
 
         # Get initial results
@@ -45,7 +46,7 @@ class PlanExecuteAgent:
         chain_of_thought.append({
             "step": 3,
             "type": "initial_results",
-            "content": f"Retrieved {len(email_results)} initial email results"
+            "content": f"Retrieved {len(email_results)} initial chunks"
         })
 
         if not email_results:
@@ -67,21 +68,34 @@ class PlanExecuteAgent:
             chain_of_thought.append({
                 "step": current_query_num + 3,
                 "type": "token_check",
-                "content": f"Current context tokens: {current_tokens}/{self.max_context_tokens} with {len(filtered_results)} emails"
+                "content": f"Current context tokens: {current_tokens}/{self.max_context_tokens} with {len(filtered_results)} chunks"
             })
 
             # If within limits, we're good to proceed
             if current_tokens <= self.max_context_tokens:
                 break
 
-            # If too large, need to filter
-            if current_query_num >= self.max_queries:
-                # Last attempt - aggressively filter
-                filtered_results = self._aggressive_filter(filtered_results, user_prompt)
+            # If too large, first try metadata-based filtering
+            pre_filter_len = len(filtered_results)
+            filtered_results = self.__metadata_filter(filtered_results, user_prompt, plan)
+            if len(filtered_results) < pre_filter_len:
                 chain_of_thought.append({
                     "step": current_query_num + 3,
-                    "type": "aggressive_filtering",
-                    "content": f"Applied aggressive filtering, reduced to {len(filtered_results)} emails"
+                    "type": "metadata_filtering",
+                    "content": f"Applied metadata filtering, reduced to {len(filtered_results)} chunks"
+                })
+
+            current_tokens = self._count_tokens_from_emails(filtered_results)
+            if current_tokens <= self.max_context_tokens:
+                break
+
+            if current_query_num >= self.max_queries:
+                # Last attempt - filter as much as possible
+                filtered_results = self.__metadata_filter(filtered_results, user_prompt, plan)
+                chain_of_thought.append({
+                    "step": current_query_num + 3,
+                    "type": "metadata_filtering",
+                    "content": f"Applied metadata filtering, reduced to {len(filtered_results)} chunks"
                 })
                 break
 
@@ -90,7 +104,7 @@ class PlanExecuteAgent:
             chain_of_thought.append({
                 "step": current_query_num + 3,
                 "type": "query_refinement",
-                "content": f"Refined query #{current_query_num + 1}: {refined_query}"
+                "content": f"Refined query #{current_query_num + 1}: {json.dumps(refined_query)}"
             })
 
             # Execute refined query
@@ -102,7 +116,7 @@ class PlanExecuteAgent:
             chain_of_thought.append({
                 "step": current_query_num + 3,
                 "type": "refined_results",
-                "content": f"After refinement: {len(filtered_results)} total unique emails"
+                "content": f"After refinement: {len(filtered_results)} total unique chunks"
             })
 
             current_query_num += 1
@@ -118,15 +132,15 @@ class PlanExecuteAgent:
             chain_of_thought.append({
                 "step": "emergency_filter",
                 "type": "emergency_filtering",
-                "content": f"Applied emergency filtering: {len(filtered_results)} emails, {final_tokens} tokens"
+                "content": f"Applied emergency filtering: {len(filtered_results)} chunks, {final_tokens} tokens"
             })
 
             if final_tokens > self.max_context_tokens:
                 return {
-                    "error": f"Unable to reduce context to fit within {self.max_context_tokens} token limit. Found relevant emails but context is too large.",
+                    "error": f"Unable to reduce context to fit within {self.max_context_tokens} token limit. Found relevant chunks but context is too large.",
                     "chain_of_thought": chain_of_thought,
                     "emails_found": len(email_results),
-                    "final_emails": len(filtered_results)
+                    "final_emails": final_tokens
                 }
 
         # Step 4: Generate final response with email context
@@ -135,7 +149,7 @@ class PlanExecuteAgent:
         chain_of_thought.append({
             "step": "final",
             "type": "response_generation",
-            "content": f"Generated response using {len(filtered_results)} emails as context ({final_tokens} tokens)"
+            "content": f"Generated response using {len(filtered_results)} chunks as context ({final_tokens} tokens)"
         })
 
         return {
@@ -143,7 +157,7 @@ class PlanExecuteAgent:
             "chain_of_thought": chain_of_thought,
             "context_tokens_used": final_tokens,
             "queries_executed": current_query_num,
-            "emails_analyzed": len(filtered_results)
+            "emails_analyzed": final_tokens
         }
 
     async def _create_plan(self, user_prompt: str) -> str:
@@ -167,8 +181,8 @@ class PlanExecuteAgent:
         response = await self.llm_service.generate(plan_prompt, max_tokens=300)
         return response.strip()
 
-    async def _generate_initial_query(self, user_prompt: str, plan: str) -> str:
-        """Generate the initial broad query"""
+    async def _generate_initial_query(self, user_prompt: str, plan: str) -> Dict[str, Any]:
+        """Generate the initial broad query as a dict with optional filters"""
         query_prompt = f"""
         Based on this search strategy, create a search query to find relevant emails:
 
@@ -179,17 +193,18 @@ class PlanExecuteAgent:
 
         Search Query:
         """
-
         response = await self.llm_service.generate(query_prompt, max_tokens=100)
-        return response.strip()
+        query_text = response.strip()
+        filters = self._extract_filters(user_prompt, plan)
+        return {"text": query_text, "limit": 20, **filters}
 
     async def _refine_query(
-            self,
-            user_prompt: str,
-            plan: str,
-            current_results: List[Dict[str, Any]],
-            iteration: int
-    ) -> str:
+        self,
+        user_prompt: str,
+        plan: str,
+        current_results: List[Dict[str, Any]],
+        iteration: int,
+    ) -> Dict[str, Any]:
         """Generate a refined query based on current results"""
 
         # Analyze current results to inform refinement
@@ -213,7 +228,41 @@ class PlanExecuteAgent:
         """
 
         response = await self.llm_service.generate(refinement_prompt, max_tokens=100)
-        return response.strip()
+        query_text = response.strip()
+        filters = self._extract_filters(user_prompt, plan)
+        return {"text": query_text, "limit": 20, **filters}
+
+    def _extract_filters(self, *texts: str) -> Dict[str, Any]:
+        """Extract sender and date filters from a series of texts"""
+        combined = " ".join(t for t in texts if t)
+        filters: Dict[str, Any] = {}
+
+        sender_match = re.search(r"from\s+([\w.\-]+@[\w\.-]+)", combined, re.IGNORECASE)
+        if sender_match:
+            filters["sender"] = sender_match.group(1)
+
+        start = None
+        end = None
+
+        exact_match = re.search(r"on\s+(\d{4}-\d{2}-\d{2})", combined)
+        if exact_match:
+            start = exact_match.group(1)
+            end = exact_match.group(1)
+
+        after_match = re.search(r"(?:after|since)\s+(\d{4}-\d{2}-\d{2})", combined, re.IGNORECASE)
+        if after_match:
+            start = after_match.group(1)
+
+        before_match = re.search(r"before\s+(\d{4}-\d{2}-\d{2})", combined, re.IGNORECASE)
+        if before_match:
+            end = before_match.group(1)
+
+        if start:
+            filters["start_date"] = start
+        if end:
+            filters["end_date"] = end
+
+        return filters
 
     def _merge_and_deduplicate(
             self,
@@ -236,15 +285,35 @@ class PlanExecuteAgent:
 
         return merged
 
-    def _aggressive_filter(
-            self,
-            results: List[Dict[str, Any]],
-            user_prompt: str
+    def __metadata_filter(
+        self,
+        results: List[Dict[str, Any]],
+        user_prompt: str,
+        plan: str,
     ) -> List[Dict[str, Any]]:
-        """Aggressively filter results to fit token limits"""
+        """Filter results using metadata clues and token limits"""
+
+        filters = self._extract_filters(user_prompt, plan)
+
+        if filters.get("sender"):
+            results = [r for r in results if r.get("sender", "").lower() == filters["sender"].lower()]
+
+        start = filters.get("start_date")
+        end = filters.get("end_date")
+        if start or end:
+            def in_range(date_str: str) -> bool:
+                if not date_str:
+                    return False
+                if start and date_str < start:
+                    return False
+                if end and date_str > end:
+                    return False
+                return True
+
+            results = [r for r in results if in_range(r.get("date", ""))]
 
         # Keep only the highest scoring results
-        sorted_results = sorted(results, key=lambda x: x.get('score', 0), reverse=True)
+        sorted_results = sorted(results, key=lambda x: x.get("score", 0), reverse=True)
 
         # Start with top results and add until we approach token limit
         filtered = []
@@ -275,15 +344,8 @@ class PlanExecuteAgent:
         if not email_results:
             return 0
 
-        # Create a text representation of the emails for token counting
-        email_text = ""
-        for email in email_results:
-            email_text += f"Subject: {email.get('subject', '')}\n"
-            email_text += f"From: {email.get('sender', '')}\n"
-            email_text += f"Date: {email.get('date', '')}\n"
-            email_text += f"Content: {email.get('content', '')}\n\n"
-
-        return len(self.encoder.encode(email_text))
+        content_text = "\n".join(email.get("content", "") for email in email_results)
+        return len(self.encoder.encode(content_text))
 
     async def _generate_final_response(
             self,
@@ -322,10 +384,11 @@ class PlanExecuteAgent:
 
         formatted_emails = []
 
-        for i, email in enumerate(email_results[:20], 1):  # Limit to top 20 emails
+        for email in email_results[:20]:  # Limit to top 20 emails
+            subject = email.get('subject', 'No Subject')
             email_text = f"""
-EMAIL {i}:
-Subject: {email.get('subject', 'No Subject')}
+EMAIL {subject}:
+Subject: {subject}
 From: {email.get('sender', 'Unknown Sender')}
 To: {email.get('recipient', 'Unknown Recipient')}
 Date: {email.get('date', 'Unknown Date')}
