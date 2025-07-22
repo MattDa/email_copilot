@@ -69,6 +69,7 @@ class ToolUsingAgent:
 
             if any(word in q_lower for word in ["all", "every", "list", "show me"]):
                 params["limit"] = 20
+                
             elif any(word in q_lower for word in ["specific", "exact", "particular"]):
                 params["limit"] = 15
 
