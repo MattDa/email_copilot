@@ -81,7 +81,8 @@ class PlanExecuteAgent:
 
             # If too large, first try metadata-based filtering
             pre_filter_len = len(filtered_results)
-            filtered_results = self.__metadata_filter(filtered_results, user_prompt)
+            filtered_results = self.__metadata_filter(filtered_results, user_prompt, plan)
+
             if len(filtered_results) < pre_filter_len:
                 chain_of_thought.append({
                     "step": current_query_num + 3,
@@ -95,7 +96,8 @@ class PlanExecuteAgent:
 
             if current_query_num >= self.max_queries:
                 # Last attempt - filter as much as possible
-                filtered_results = self.__metadata_filter(filtered_results, user_prompt)
+
+                filtered_results = self.__metadata_filter(filtered_results, user_prompt, plan)
                 chain_of_thought.append({
                     "step": current_query_num + 3,
                     "type": "metadata_filtering",
@@ -199,7 +201,8 @@ class PlanExecuteAgent:
         """
         response = await self.llm_service.generate(query_prompt, max_tokens=100)
         query_text = response.strip()
-        filters = self._extract_filters(user_prompt)
+        filters = self._extract_filters(user_prompt, plan)
+
         return {"text": query_text, "limit": 20, **filters}
 
     async def _refine_query(
@@ -233,30 +236,33 @@ class PlanExecuteAgent:
 
         response = await self.llm_service.generate(refinement_prompt, max_tokens=100)
         query_text = response.strip()
-        filters = self._extract_filters(user_prompt)
+        filters = self._extract_filters(user_prompt, plan)
         return {"text": query_text, "limit": 20, **filters}
 
-    def _extract_filters(self, text: str) -> Dict[str, Any]:
-        """Extract sender and date filters from text"""
+    def _extract_filters(self, *texts: str) -> Dict[str, Any]:
+        """Extract sender and date filters from a series of texts"""
+        combined = " ".join(t for t in texts if t)
         filters: Dict[str, Any] = {}
 
-        sender_match = re.search(r"from\s+([\w.\-]+@[\w\.-]+)", text, re.IGNORECASE)
+        sender_match = re.search(r"from\s+([\w.\-]+@[\w\.-]+)", combined, re.IGNORECASE)
+        
         if sender_match:
             filters["sender"] = sender_match.group(1)
 
         start = None
         end = None
 
-        exact_match = re.search(r"on\s+(\d{4}-\d{2}-\d{2})", text)
+        exact_match = re.search(r"on\s+(\d{4}-\d{2}-\d{2})", combined)
+
         if exact_match:
             start = exact_match.group(1)
             end = exact_match.group(1)
 
-        after_match = re.search(r"(?:after|since)\s+(\d{4}-\d{2}-\d{2})", text, re.IGNORECASE)
+        after_match = re.search(r"(?:after|since)\s+(\d{4}-\d{2}-\d{2})", combined, re.IGNORECASE)
         if after_match:
             start = after_match.group(1)
 
-        before_match = re.search(r"before\s+(\d{4}-\d{2}-\d{2})", text, re.IGNORECASE)
+        before_match = re.search(r"before\s+(\d{4}-\d{2}-\d{2})", combined, re.IGNORECASE)
         if before_match:
             end = before_match.group(1)
 
@@ -292,10 +298,11 @@ class PlanExecuteAgent:
         self,
         results: List[Dict[str, Any]],
         user_prompt: str,
+        plan: str,
     ) -> List[Dict[str, Any]]:
         """Filter results using metadata clues and token limits"""
 
-        filters = self._extract_filters(user_prompt)
+        filters = self._extract_filters(user_prompt, plan)
 
         if filters.get("sender"):
             results = [r for r in results if r.get("sender", "").lower() == filters["sender"].lower()]
