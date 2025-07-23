@@ -13,7 +13,7 @@ from services.chroma_service import ChromaService
 from services.llm_service import LLMService
 from agents.plan_execute_agent import PlanExecuteAgent
 
-app = FastAPI(title="Email Copilot", version="1.0.0")
+app = FastAPI(title="Agent Smith", version="1.0.0")
 
 # Initialize services
 chroma_service = ChromaService()

@@ -2,24 +2,34 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Email Copilot</title>
+<title>Agent Smith</title>
     <style>
-        body { font-family: Arial, sans-serif; margin: 40px; }
+        body {
+            font-family: Arial, sans-serif;
+            margin: 40px;
+            background: #121212;
+            color: #e0e0e0;
+        }
         .container { max-width: 1200px; margin: 0 auto; }
-        .upload-section, .query-section { margin-bottom: 30px; padding: 20px; border: 1px solid #ddd; }
-        .query-input { width: 100%; height: 100px; margin-bottom: 10px; }
+        .upload-section, .query-section {
+            margin-bottom: 30px;
+            padding: 20px;
+            border: 1px solid #333;
+            background: #1e1e1e;
+        }
+        .query-input { width: 100%; height: 100px; margin-bottom: 10px; background:#2a2a2a; color:#e0e0e0; border:1px solid #555; }
         .response-section { margin-top: 20px; }
-        .chain-of-thought { background: #f5f5f5; padding: 15px; margin: 10px 0; }
-        .step { margin: 5px 0; padding: 5px; background: white; }
+        .chain-of-thought { background: #1b1b1b; padding: 15px; margin: 10px 0; border:1px solid #333; }
+        .step { margin: 5px 0; padding: 5px; background: #2b2b2b; border:1px solid #444; white-space: pre-wrap; }
         button { padding: 10px 20px; background: #007cba; color: white; border: none; cursor: pointer; }
         button:hover { background: #005a87; }
         .file-list { margin-top: 15px; }
-        .file-item { margin: 5px 0; padding: 5px; background: #f0f0f0; border-radius: 3px; }
+        .file-item { margin: 5px 0; padding: 5px; background: #2b2b2b; border-radius: 3px; border:1px solid #444; }
     </style>
 </head>
 <body>
 <div class="container">
-    <h1>Email Copilot</h1>
+    <h1>Agent Smith</h1>
 
     <!-- File Upload Section -->
     <div class="upload-section">
@@ -48,7 +58,20 @@
     </div>
 </div>
 
-<script>
+  <script>
+     function escapeHtml(text) {
+         return text
+             .replace(/&/g, "&amp;")
+             .replace(/</g, "&lt;")
+             .replace(/>/g, "&gt;");
+     }
+
+     function renderMarkdown(text) {
+         if (!text) return "";
+         let escaped = escapeHtml(text);
+         escaped = escaped.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+         return escaped.replace(/\n/g, '<br>');
+     }
     async function uploadFiles() {
         const fileInput = document.getElementById('fileInput');
         const files = fileInput.files;
@@ -130,8 +153,8 @@
         document.getElementById('responseSection').style.display = 'block';
 
         // Display main response
-        document.getElementById('response').innerHTML =
-            result.error ? `❌ ${result.error}` : result.response;
+         document.getElementById('response').innerHTML =
+             result.error ? `❌ ${renderMarkdown(result.error)}` : renderMarkdown(result.response);
 
         // Display chain of thought
         const chainDiv = document.getElementById('chainOfThought');
@@ -141,7 +164,7 @@
             result.chain_of_thought.forEach(step => {
                 const stepDiv = document.createElement('div');
                 stepDiv.className = 'step';
-                stepDiv.innerHTML = `<strong>Step ${step.step} (${step.type}):</strong> ${step.content}`;
+                 stepDiv.innerHTML = `<strong>Step ${step.step} (${step.type}):</strong> ${renderMarkdown(step.content)}`;
                 chainDiv.appendChild(stepDiv);
             });
         }

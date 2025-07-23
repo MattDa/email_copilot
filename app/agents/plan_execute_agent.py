@@ -245,7 +245,7 @@ class PlanExecuteAgent:
         filters: Dict[str, Any] = {}
 
         sender_match = re.search(r"from\s+([\w.\-]+@[\w\.-]+)", combined, re.IGNORECASE)
-        
+
         if sender_match:
             filters["sender"] = sender_match.group(1)
 
