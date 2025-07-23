@@ -61,7 +61,11 @@ class PlanExecuteAgent:
         filtered_results = email_results
         current_query_num = 1
 
-        while current_query_num <= self.max_queries:
+        # Check token count of current results
+        current_tokens = self._count_tokens_from_emails(filtered_results)
+
+        while (current_query_num <= self.max_queries or
+               current_tokens <= self.max_context_tokens):
             # Check token count of current results
             current_tokens = self._count_tokens_from_emails(filtered_results)
 
@@ -78,6 +82,7 @@ class PlanExecuteAgent:
             # If too large, first try metadata-based filtering
             pre_filter_len = len(filtered_results)
             filtered_results = self.__metadata_filter(filtered_results, user_prompt, plan)
+
             if len(filtered_results) < pre_filter_len:
                 chain_of_thought.append({
                     "step": current_query_num + 3,
@@ -91,6 +96,7 @@ class PlanExecuteAgent:
 
             if current_query_num >= self.max_queries:
                 # Last attempt - filter as much as possible
+
                 filtered_results = self.__metadata_filter(filtered_results, user_prompt, plan)
                 chain_of_thought.append({
                     "step": current_query_num + 3,
@@ -196,6 +202,7 @@ class PlanExecuteAgent:
         response = await self.llm_service.generate(query_prompt, max_tokens=100)
         query_text = response.strip()
         filters = self._extract_filters(user_prompt, plan)
+
         return {"text": query_text, "limit": 20, **filters}
 
     async def _refine_query(
@@ -238,6 +245,7 @@ class PlanExecuteAgent:
         filters: Dict[str, Any] = {}
 
         sender_match = re.search(r"from\s+([\w.\-]+@[\w\.-]+)", combined, re.IGNORECASE)
+
         if sender_match:
             filters["sender"] = sender_match.group(1)
 
@@ -245,6 +253,7 @@ class PlanExecuteAgent:
         end = None
 
         exact_match = re.search(r"on\s+(\d{4}-\d{2}-\d{2})", combined)
+
         if exact_match:
             start = exact_match.group(1)
             end = exact_match.group(1)
